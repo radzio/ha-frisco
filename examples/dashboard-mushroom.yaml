@@ -79,11 +79,10 @@ cards:
   # --- Active order on its way (hidden when nothing is in transit) ----------
   - type: conditional
     conditions:
-      - condition: state
-        entity: sensor.frisco_active_order_delivery
+      # Shorthand form — state_not is only valid here, not under "condition: state".
+      - entity: sensor.frisco_active_order_delivery
         state_not: unknown
-      - condition: state
-        entity: sensor.frisco_active_order_delivery
+      - entity: sensor.frisco_active_order_delivery
         state_not: unavailable
     card:
       type: custom:mushroom-template-card
@@ -106,8 +105,7 @@ cards:
   # --- Driver on the map, only while the van is out for delivery ------------
   - type: conditional
     conditions:
-      - condition: state
-        entity: device_tracker.frisco_driver
+      - entity: device_tracker.frisco_driver
         state_not: unavailable
     card:
       type: map
