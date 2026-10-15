@@ -19,9 +19,9 @@ or changes orders.
 
 | Entity | What it shows |
 |---|---|
-| `sensor.frisco_next_reservation` | Start of your held delivery window (timestamp). Attributes: `window_end`, `valid_until`, `modify_until`, `address`, `warehouse`, `is_vip`. |
-| `sensor.frisco_reservation_valid_until` | When the held slot expires if you don't place the order. |
-| `sensor.frisco_active_order_delivery` | Delivery window start of the order on its way. Attributes: `status`, `status_raw`, `window_end`, `order_id`, `placed_at`, `product_lines`, `quantity`. |
+| `sensor.frisco_next_reservation` | Start of your **soonest** held delivery window (timestamp). Attributes: `count` (how many reservations you hold), `window_end`, `valid_until`, `modify_until`, `address`, `warehouse`, `is_vip`, and `all` — a list of every held reservation with its own window and validity. |
+| `sensor.frisco_reservation_valid_until` | When the soonest held slot expires if you don't place the order. |
+| `sensor.frisco_active_order_delivery` | Delivery window start of the **soonest** order on its way. Attributes: `count` (orders in flight), `status`, `status_raw`, `window_end`, `order_id`, `placed_at`, `product_lines`, `quantity`, and `all` — every active order with its status and window. |
 | `device_tracker.frisco_driver` | Driver GPS position; `available` only while the order status is *out for delivery*. |
 
 When nothing is reserved / in transit, the corresponding sensor is `unknown` and

@@ -52,16 +52,34 @@ class FriscoSensorDescription(SensorEntityDescription):
     attrs_fn: Callable[[FriscoData], dict[str, Any]] | None = None
 
 
+def _reservation_summary(res: dict[str, Any]) -> dict[str, Any]:
+    """Compact per-reservation record for the `all` attribute list."""
+    window = res.get("deliveryWindow") or {}
+    return {
+        "window_start": window.get("startsAt"),
+        "window_end": window.get("endsAt"),
+        "valid_until": res.get("expiresAt"),
+        "modify_until": window.get("finalAt") or window.get("closesAt"),
+        "address": _format_address(res.get("shippingAddress")),
+    }
+
+
 def _reservation_window_start(data: FriscoData) -> datetime | None:
-    res = data.reservation or {}
-    return _dt((res.get("deliveryWindow") or {}).get("startsAt"))
+    if not data.reservations:
+        return None
+    return _dt((data.reservations[0].get("deliveryWindow") or {}).get("startsAt"))
 
 
 def _reservation_attrs(data: FriscoData) -> dict[str, Any]:
-    res = data.reservation or {}
+    reservations = data.reservations
+    if not reservations:
+        return {"count": 0}
+    # Soonest reservation drives the detailed fields; the rest are in `all`.
+    res = reservations[0]
     window = res.get("deliveryWindow") or {}
     extended = res.get("extendedRange") or {}
     return {
+        "count": len(reservations),
         "window_start": window.get("startsAt"),
         "window_end": window.get("endsAt"),
         "extended_window_start": extended.get("startsAt"),
@@ -72,23 +90,46 @@ def _reservation_attrs(data: FriscoData) -> dict[str, Any]:
         "delivery_method": window.get("deliveryMethod"),
         "is_vip": res.get("isVipReservation"),
         "address": _format_address(res.get("shippingAddress")),
+        "all": [_reservation_summary(r) for r in reservations],
+    }
+
+
+def _valid_until(data: FriscoData) -> datetime | None:
+    if not data.reservations:
+        return None
+    return _dt(data.reservations[0].get("expiresAt"))
+
+
+def _order_summary(order: dict[str, Any]) -> dict[str, Any]:
+    """Compact per-order record for the `all` attribute list."""
+    window = (order.get("reservation") or {}).get("deliveryWindow") or {}
+    raw_status = order.get("status")
+    return {
+        "order_id": order.get("id"),
+        "status": STATUS_LABELS.get(raw_status, raw_status),
+        "status_raw": raw_status,
+        "window_start": window.get("startsAt"),
+        "window_end": window.get("endsAt"),
     }
 
 
 def _order_window_start(data: FriscoData) -> datetime | None:
-    order = data.active_order or {}
-    window = (order.get("reservation") or {}).get("deliveryWindow") or {}
+    if not data.active_orders:
+        return None
+    window = (data.active_orders[0].get("reservation") or {}).get("deliveryWindow") or {}
     return _dt(window.get("startsAt"))
 
 
 def _order_attrs(data: FriscoData) -> dict[str, Any]:
-    order = data.active_order
-    if not order:
-        return {}
+    orders = data.active_orders
+    if not orders:
+        return {"count": 0}
+    order = orders[0]
     window = (order.get("reservation") or {}).get("deliveryWindow") or {}
     raw_status = order.get("status")
     stats = (order.get("deliveryStatistics") or {}).get("totals") or {}
     return {
+        "count": len(orders),
         "order_id": order.get("id"),
         "status": STATUS_LABELS.get(raw_status, raw_status),
         "status_raw": raw_status,
@@ -98,6 +139,7 @@ def _order_attrs(data: FriscoData) -> dict[str, Any]:
         "payment_method": order.get("paymentMethod"),
         "product_lines": stats.get("lines"),
         "quantity": stats.get("quantity"),
+        "all": [_order_summary(o) for o in orders],
     }
 
 
@@ -115,7 +157,7 @@ SENSORS: tuple[FriscoSensorDescription, ...] = (
         translation_key="reservation_valid_until",
         device_class=SensorDeviceClass.TIMESTAMP,
         icon="mdi:timer-sand",
-        value_fn=lambda data: _dt((data.reservation or {}).get("expiresAt")),
+        value_fn=_valid_until,
     ),
     FriscoSensorDescription(
         key="active_order_delivery",

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import logging
 from typing import Any
@@ -23,26 +23,46 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Sorts undated items last rather than crashing on the comparison.
+_LATEST = datetime.max.replace(tzinfo=None)
+
 
 @dataclass
 class FriscoData:
-    """Everything the entities read, assembled once per poll."""
+    """Everything the entities read, assembled once per poll.
 
-    reservation: dict[str, Any] | None = None
-    active_order: dict[str, Any] | None = None
+    Both lists are sorted by delivery-window start (soonest first), so entities
+    can take ``[0]`` as the primary item and expose the rest as attributes.
+    """
+
+    reservations: list[dict[str, Any]] = field(default_factory=list)
+    active_orders: list[dict[str, Any]] = field(default_factory=list)
     delivery: dict[str, Any] | None = None
 
 
-def _window_start(obj: dict[str, Any]) -> datetime | None:
-    """Parse reservation.deliveryWindow.startsAt into an aware datetime."""
-    window = (obj.get("reservation") or {}).get("deliveryWindow") or {}
-    raw = window.get("startsAt")
+def _parse_dt(raw: str | None) -> datetime | None:
     if not raw:
         return None
     try:
         return datetime.fromisoformat(raw)
     except (ValueError, TypeError):
         return None
+
+
+def _reservation_start(reservation: dict[str, Any]) -> datetime | None:
+    """Delivery-window start of a bare reservation object."""
+    return _parse_dt((reservation.get("deliveryWindow") or {}).get("startsAt"))
+
+
+def _order_start(order: dict[str, Any]) -> datetime | None:
+    """Delivery-window start of an order (window lives under order.reservation)."""
+    window = (order.get("reservation") or {}).get("deliveryWindow") or {}
+    return _parse_dt(window.get("startsAt"))
+
+
+def _by_start(start_of):
+    """Sort key: soonest window first, naive for safe comparison across tz."""
+    return lambda item: (start_of(item) or _LATEST).replace(tzinfo=None)
 
 
 class FriscoCoordinator(DataUpdateCoordinator[FriscoData]):
@@ -60,23 +80,22 @@ class FriscoCoordinator(DataUpdateCoordinator[FriscoData]):
         )
         self.client = client
 
-    def _select_active_order(
-        self, orders: list[dict[str, Any]]
-    ) -> dict[str, Any] | None:
-        """The soonest-arriving order that is still on its way.
+    @staticmethod
+    def _collect_reservations(cart: dict[str, Any]) -> list[dict[str, Any]]:
+        """All held reservations: the primary `reservation` plus `savedReservations`."""
+        reservations: list[dict[str, Any]] = []
+        if primary := cart.get("reservation"):
+            reservations.append(primary)
+        reservations.extend(cart.get("savedReservations") or [])
+        reservations.sort(key=_by_start(_reservation_start))
+        return reservations
 
-        Frisco returns orders newest-first. We keep those whose status is not
-        terminal, then prefer the one with the earliest delivery window — that is
-        the next one to actually show up at the door.
-        """
+    @staticmethod
+    def _collect_active_orders(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Every order still on its way, soonest delivery first."""
         active = [o for o in orders if o.get("status") not in INACTIVE_STATUSES]
-        if not active:
-            return None
-        dateless = datetime.max.replace(tzinfo=None)
-        return min(
-            active,
-            key=lambda o: (_window_start(o) or dateless).replace(tzinfo=None),
-        )
+        active.sort(key=_by_start(_order_start))
+        return active
 
     async def _async_update_data(self) -> FriscoData:
         try:
@@ -88,29 +107,29 @@ class FriscoCoordinator(DataUpdateCoordinator[FriscoData]):
         except FriscoApiError as err:
             raise UpdateFailed(str(err)) from err
 
-        active_order = self._select_active_order(orders)
+        reservations = self._collect_reservations(cart)
+        active_orders = self._collect_active_orders(orders)
 
-        delivery: dict[str, Any] | None = None
-        out_for_delivery = (
-            active_order is not None
-            and active_order.get("status") in OUT_FOR_DELIVERY_STATUSES
+        # The order whose driver (if any) we track: soonest one that's en route.
+        en_route = next(
+            (o for o in active_orders if o.get("status") in OUT_FOR_DELIVERY_STATUSES),
+            None,
         )
-        if out_for_delivery:
+        delivery: dict[str, Any] | None = None
+        if en_route is not None:
             try:
-                delivery = await self.client.async_get_order_delivery(
-                    active_order["id"]
-                )
+                delivery = await self.client.async_get_order_delivery(en_route["id"])
             except FriscoApiError as err:
                 # Don't fail the whole poll just because live tracking hiccups.
                 _LOGGER.debug("delivery detail fetch failed: %s", err)
 
         # Poll faster while a driver is en route, slower the rest of the time.
         self.update_interval = (
-            UPDATE_INTERVAL_DELIVERY if out_for_delivery else UPDATE_INTERVAL
+            UPDATE_INTERVAL_DELIVERY if en_route is not None else UPDATE_INTERVAL
         )
 
         return FriscoData(
-            reservation=cart.get("reservation"),
-            active_order=active_order,
+            reservations=reservations,
+            active_orders=active_orders,
             delivery=delivery,
         )
