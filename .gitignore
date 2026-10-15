@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets / local recon
+*.local.json
+frisco_creds.json
+frisco_token.json
+recon_out.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

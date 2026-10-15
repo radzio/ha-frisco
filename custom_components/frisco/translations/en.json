@@ -1,0 +1,56 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Frisco",
+        "description": "Sign in with your Frisco.pl account (the same e-mail and password you use in the app).",
+        "data": {
+          "username": "E-mail",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Frisco",
+        "description": "Re-enter the password for {username}.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid e-mail or password.",
+      "cannot_connect": "Could not reach Frisco. Try again."
+    },
+    "abort": {
+      "already_configured": "This Frisco account is already set up.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "next_reservation": {
+        "name": "Next reservation",
+        "state_attributes": {
+          "valid_until": { "name": "Valid until" },
+          "modify_until": { "name": "Editable until" },
+          "window_end": { "name": "Window end" },
+          "address": { "name": "Address" }
+        }
+      },
+      "reservation_valid_until": {
+        "name": "Reservation valid until"
+      },
+      "active_order_delivery": {
+        "name": "Active order delivery",
+        "state_attributes": {
+          "status": { "name": "Status" }
+        }
+      }
+    },
+    "device_tracker": {
+      "driver": {
+        "name": "Driver"
+      }
+    }
+  }
+}
