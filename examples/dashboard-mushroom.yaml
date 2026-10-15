@@ -1,0 +1,117 @@
+# Frisco — Mushroom card stack.
+# Paste as a Manual card (Edit dashboard → Add card → Manual), or drop into any
+# view's YAML. Requires: lovelace-mushroom. Labels are Polish to match the estate.
+type: vertical-stack
+cards:
+  - type: custom:mushroom-title-card
+    title: Frisco
+    subtitle: Dostawy zakupów
+
+  # --- Next (soonest) reservation -----------------------------------------
+  - type: custom:mushroom-template-card
+    primary: Następna rezerwacja
+    secondary: |-
+      {% set s = states('sensor.frisco_next_reservation') %}
+      {% if s in ['unknown','unavailable'] %}
+        Brak aktywnej rezerwacji
+      {% else %}
+        {% set e = state_attr('sensor.frisco_next_reservation','window_end') %}
+        {% set dni = ['pon','wt','śr','czw','pt','sob','niedz'] %}
+        {{ dni[as_datetime(s).weekday()] }} {{ as_timestamp(s)|timestamp_custom('%-d.%m, %H:%M') }}–{{ as_timestamp(e)|timestamp_custom('%H:%M') }}
+      {% endif %}
+    icon: mdi:calendar-clock
+    icon_color: |-
+      {{ 'blue' if states('sensor.frisco_next_reservation') not in ['unknown','unavailable'] else 'disabled' }}
+    badge_icon: |-
+      {{ 'mdi:crown' if state_attr('sensor.frisco_next_reservation','is_vip') else '' }}
+    badge_color: amber
+    multiline_secondary: true
+    tap_action:
+      action: more-info
+
+  # --- Chips: validity countdown + how many reservations are held ----------
+  - type: custom:mushroom-chips-card
+    alignment: center
+    chips:
+      - type: template
+        icon: mdi:timer-sand
+        icon_color: |-
+          {% set v = states('sensor.frisco_reservation_valid_until') %}
+          {% if v in ['unknown','unavailable'] %}disabled
+          {% else %}
+            {% set m = (as_timestamp(v) - as_timestamp(now())) / 60 %}
+            {{ 'red' if m < 60 else 'orange' if m < 240 else 'green' }}
+          {% endif %}
+        content: |-
+          {% set v = states('sensor.frisco_reservation_valid_until') %}
+          {% if v in ['unknown','unavailable'] %}—
+          {% else %}
+            {% set m = ((as_timestamp(v) - as_timestamp(now())) / 60) | int %}
+            {% if m < 0 %}wygasła
+            {% elif m < 60 %}ważna: za {{ m }} min
+            {% elif m < 1440 %}ważna: za {{ (m / 60) | int }} h
+            {% else %}ważna: za {{ (m / 1440) | int }} dni{% endif %}
+          {% endif %}
+      - type: template
+        icon: mdi:calendar-multiple
+        icon_color: blue
+        content: >-
+          {{ state_attr('sensor.frisco_next_reservation','count') or 0 }} rezerw.
+        tap_action:
+          action: more-info
+          entity: sensor.frisco_next_reservation
+
+  # --- All reservations, only when you hold more than one ------------------
+  - type: conditional
+    conditions:
+      - condition: numeric_state
+        entity: sensor.frisco_next_reservation
+        attribute: count
+        above: 1
+    card:
+      type: markdown
+      content: |-
+        {% set dni = ['pon','wt','śr','czw','pt','sob','niedz'] %}
+        {% for r in state_attr('sensor.frisco_next_reservation','all') %}
+        - **{{ dni[as_datetime(r.window_start).weekday()] }} {{ as_timestamp(r.window_start)|timestamp_custom('%-d.%m %H:%M') }}–{{ as_timestamp(r.window_end)|timestamp_custom('%H:%M') }}**{% if r.valid_until %} · ważna do {{ as_timestamp(r.valid_until)|timestamp_custom('%-d.%m %H:%M') }}{% endif %}
+        {% endfor %}
+
+  # --- Active order on its way (hidden when nothing is in transit) ----------
+  - type: conditional
+    conditions:
+      - condition: state
+        entity: sensor.frisco_active_order_delivery
+        state_not: unknown
+      - condition: state
+        entity: sensor.frisco_active_order_delivery
+        state_not: unavailable
+    card:
+      type: custom:mushroom-template-card
+      primary: |-
+        {% set n = state_attr('sensor.frisco_active_order_delivery','count') or 1 %}
+        {{ 'Zamówienia w drodze' if n > 1 else 'Zamówienie w drodze' }}{{ ' (' ~ n ~ ')' if n > 1 else '' }}
+      secondary: |-
+        {% set e = state_attr('sensor.frisco_active_order_delivery','window_end') %}
+        {% set s = states('sensor.frisco_active_order_delivery') %}
+        {% set dni = ['pon','wt','śr','czw','pt','sob','niedz'] %}
+        {{ state_attr('sensor.frisco_active_order_delivery','status') }} · {{ dni[as_datetime(s).weekday()] }} {{ as_timestamp(s)|timestamp_custom('%-d.%m, %H:%M') }}–{{ as_timestamp(e)|timestamp_custom('%H:%M') }}
+      icon: mdi:truck-delivery
+      icon_color: |-
+        {% set st = state_attr('sensor.frisco_active_order_delivery','status_raw') %}
+        {{ 'green' if st == 'Delivery' else 'blue' if st in ['Ready','Sent'] else 'orange' }}
+      multiline_secondary: true
+      tap_action:
+        action: more-info
+
+  # --- Driver on the map, only while the van is out for delivery ------------
+  - type: conditional
+    conditions:
+      - condition: state
+        entity: device_tracker.frisco_driver
+        state_not: unavailable
+    card:
+      type: map
+      title: Kierowca
+      default_zoom: 14
+      entities:
+        - device_tracker.frisco_driver
