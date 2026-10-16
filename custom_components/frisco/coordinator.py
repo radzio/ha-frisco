@@ -41,6 +41,9 @@ class FriscoData:
     reservations: list[dict[str, Any]] = field(default_factory=list)
     active_orders: list[dict[str, Any]] = field(default_factory=list)
     delivery: dict[str, Any] | None = None
+    # Id of the order Frisco has actually dispatched (its delivery document
+    # exists) — the real "out for delivery" signal, not an inference from time.
+    en_route_order_id: str | None = None
 
 
 def _parse_dt(raw: str | None) -> datetime | None:
@@ -145,6 +148,7 @@ class FriscoCoordinator(DataUpdateCoordinator[FriscoData]):
         en_route = self._en_route_order(active_orders, now)
 
         delivery: dict[str, Any] | None = None
+        en_route_id: str | None = None
         if en_route is not None:
             try:
                 # 404 (document not created yet) comes back as None — expected
@@ -152,8 +156,11 @@ class FriscoCoordinator(DataUpdateCoordinator[FriscoData]):
                 delivery = await self.client.async_get_order_delivery(en_route["id"])
             except FriscoApiError as err:
                 _LOGGER.debug("delivery detail fetch failed: %s", err)
+            if delivery:
+                en_route_id = en_route["id"]
 
-        # Poll faster while an order is in its delivery window.
+        # Poll faster while an order is in its delivery window, so we catch the
+        # dispatch document (and then the moving driver) as soon as it appears.
         self.update_interval = (
             UPDATE_INTERVAL_DELIVERY if en_route is not None else UPDATE_INTERVAL
         )
@@ -162,4 +169,5 @@ class FriscoCoordinator(DataUpdateCoordinator[FriscoData]):
             reservations=reservations,
             active_orders=active_orders,
             delivery=delivery,
+            en_route_order_id=en_route_id,
         )

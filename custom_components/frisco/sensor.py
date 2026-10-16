@@ -22,20 +22,24 @@ from .coordinator import FriscoData
 from .entity import FriscoEntity
 
 
-def _order_status(order: dict[str, Any]) -> str:
-    """Human delivery status derived from the window, not just the raw status.
+def _order_status(order: dict[str, Any], en_route_id: str | None = None) -> str:
+    """Human delivery status.
 
-    Frisco leaves an order "Invoiced" from finalisation through delivery, so the
-    window timing is what actually tells you where it is.
+    Prefers the *real* dispatch signal: when Frisco has created the order's
+    delivery document (``en_route_id``), the van is genuinely out — no guessing.
+    Only the softer pre-dispatch states fall back to the window, because the API
+    exposes nothing else there (``status`` stays "Invoiced" throughout).
     """
+    if en_route_id and order.get("id") == en_route_id:
+        return "Out for delivery"
     window = (order.get("reservation") or {}).get("deliveryWindow") or {}
     start = _dt(window.get("startsAt"))
     end = _dt(window.get("endsAt"))
     now = dt_util.now()
-    if start and end and start <= now <= end:
-        return "Out for delivery"
     if end and now > end:
         return "Delivered"
+    if start and end and start <= now <= end:
+        return "In delivery window"
     if order.get("status") in ("Invoiced", "Archived"):
         return "Confirmed"
     return STATUS_LABELS.get(order.get("status"), order.get("status"))
@@ -120,12 +124,12 @@ def _valid_until(data: FriscoData) -> datetime | None:
     return _dt(data.reservations[0].get("expiresAt"))
 
 
-def _order_summary(order: dict[str, Any]) -> dict[str, Any]:
+def _order_summary(order: dict[str, Any], en_route_id: str | None = None) -> dict[str, Any]:
     """Compact per-order record for the `all` attribute list."""
     window = (order.get("reservation") or {}).get("deliveryWindow") or {}
     return {
         "order_id": order.get("id"),
-        "status": _order_status(order),
+        "status": _order_status(order, en_route_id),
         "status_raw": order.get("status"),
         "window_start": window.get("startsAt"),
         "window_end": window.get("endsAt"),
@@ -146,18 +150,21 @@ def _order_attrs(data: FriscoData) -> dict[str, Any]:
     order = orders[0]
     window = (order.get("reservation") or {}).get("deliveryWindow") or {}
     stats = (order.get("deliveryStatistics") or {}).get("totals") or {}
+    en_route = data.en_route_order_id
     return {
         "count": len(orders),
         "order_id": order.get("id"),
-        "status": _order_status(order),
+        "status": _order_status(order, en_route),
         "status_raw": order.get("status"),
+        # True once Frisco has actually dispatched this order (real signal).
+        "dispatched": en_route is not None and order.get("id") == en_route,
         "window_start": window.get("startsAt"),
         "window_end": window.get("endsAt"),
         "placed_at": order.get("placedAt"),
         "payment_method": order.get("paymentMethod"),
         "product_lines": stats.get("lines"),
         "quantity": stats.get("quantity"),
-        "all": [_order_summary(o) for o in orders],
+        "all": [_order_summary(o, data.en_route_order_id) for o in orders],
     }
 
 
