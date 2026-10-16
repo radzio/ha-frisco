@@ -18,7 +18,7 @@ from homeassistant.util import dt as dt_util
 
 from . import FriscoConfigEntry
 from .const import STATUS_LABELS
-from .coordinator import FriscoData
+from .coordinator import FriscoData, delivery_eta, delivery_last_refreshed
 from .entity import FriscoEntity
 
 
@@ -151,13 +151,17 @@ def _order_attrs(data: FriscoData) -> dict[str, Any]:
     window = (order.get("reservation") or {}).get("deliveryWindow") or {}
     stats = (order.get("deliveryStatistics") or {}).get("totals") or {}
     en_route = data.en_route_order_id
+    dispatched = en_route is not None and order.get("id") == en_route
     return {
         "count": len(orders),
         "order_id": order.get("id"),
         "status": _order_status(order, en_route),
         "status_raw": order.get("status"),
         # True once Frisco has actually dispatched this order (real signal).
-        "dispatched": en_route is not None and order.get("id") == en_route,
+        "dispatched": dispatched,
+        # Precise arrival once dispatched; None beforehand (window is the guide).
+        "estimated_arrival": delivery_eta(data.delivery) if dispatched else None,
+        "driver_last_seen": delivery_last_refreshed(data.delivery) if dispatched else None,
         "window_start": window.get("startsAt"),
         "window_end": window.get("endsAt"),
         "placed_at": order.get("placedAt"),

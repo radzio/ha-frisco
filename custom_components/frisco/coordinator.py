@@ -55,6 +55,32 @@ def _parse_dt(raw: str | None) -> datetime | None:
         return None
 
 
+# -- live-delivery document shape -----------------------------------------
+# Confirmed from a real en-route delivery (2026-10-16): the document is
+#   {"orderId", "userId", "lastRefreshedAt",
+#    "estimation": {"estimatedArrivalAt", "coordinates": {latitude, longitude}}}
+# `estimation.coordinates` is the *moving driver*, not the delivery address.
+
+
+def delivery_coords(delivery: dict[str, Any] | None) -> tuple[float, float] | None:
+    """Driver's live (lat, lon) from a delivery document, or None."""
+    coords = ((delivery or {}).get("estimation") or {}).get("coordinates") or {}
+    lat, lon = coords.get("latitude"), coords.get("longitude")
+    if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+        return float(lat), float(lon)
+    return None
+
+
+def delivery_eta(delivery: dict[str, Any] | None) -> str | None:
+    """ISO estimated-arrival time (the real "will be delivered at"), or None."""
+    return ((delivery or {}).get("estimation") or {}).get("estimatedArrivalAt")
+
+
+def delivery_last_refreshed(delivery: dict[str, Any] | None) -> str | None:
+    """When Frisco last refreshed the driver's position, or None."""
+    return (delivery or {}).get("lastRefreshedAt")
+
+
 def _reservation_start(reservation: dict[str, Any]) -> datetime | None:
     """Delivery-window start of a bare reservation object."""
     return _parse_dt((reservation.get("deliveryWindow") or {}).get("startsAt"))

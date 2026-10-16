@@ -10,17 +10,21 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import FriscoConfigEntry
-from .coordinator import FriscoData
+from .coordinator import (
+    FriscoData,
+    delivery_coords,
+    delivery_eta,
+    delivery_last_refreshed,
+)
 from .entity import FriscoEntity
 
 _LOGGER = logging.getLogger(__name__)
 
-# The live-delivery payload is only produced while a driver is on the road, so
-# its exact field names can't be captured from an idle account. The app renders
-# the driver marker from a {latitude, longitude} pair; these are the plausible
-# containers/keys to look under. The raw payload is logged at debug the first
-# time it appears so the mapping can be nailed down from a real delivery.
-_COORD_CONTAINERS = ("coordinates", "driverCoordinates", "position", "driverPosition", "location")
+# The confirmed live shape is estimation.coordinates (see coordinator), read via
+# delivery_coords(). This depth-first search stays as a resilience fallback: if
+# Frisco ever moves the pair, we still find it and log the raw payload once so
+# the mapping can be re-confirmed, rather than silently losing the driver.
+_COORD_CONTAINERS = ("estimation", "coordinates", "driverCoordinates", "position", "driverPosition", "location")
 _LAT_KEYS = ("latitude", "lat")
 _LON_KEYS = ("longitude", "lon", "lng")
 
@@ -68,7 +72,8 @@ class FriscoDriverTracker(FriscoEntity, TrackerEntity):
         data: FriscoData = self.coordinator.data
         if not data.delivery:
             return None
-        coords = _find_coords(data.delivery)
+        # Known shape first; DFS only if Frisco ever relocates the pair.
+        coords = delivery_coords(data.delivery) or _find_coords(data.delivery)
         if coords is None and not self._logged_shape:
             # One-off: capture a real delivery payload to confirm field names.
             _LOGGER.debug("Frisco delivery payload (no coords matched): %s", data.delivery)
@@ -82,6 +87,16 @@ class FriscoDriverTracker(FriscoEntity, TrackerEntity):
     @property
     def available(self) -> bool:
         return super().available and self._coords() is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        delivery = self.coordinator.data.delivery
+        if not delivery:
+            return None
+        return {
+            "estimated_arrival": delivery_eta(delivery),
+            "last_refreshed": delivery_last_refreshed(delivery),
+        }
 
     @property
     def latitude(self) -> float | None:
