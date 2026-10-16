@@ -170,6 +170,10 @@ class FriscoClient:
     async def async_get_order_delivery(self, order_id: str) -> dict[str, Any] | None:
         """Live delivery detail for one order (driver coordinates); None if idle.
 
-        order_id is the full id as returned by the orders list, e.g. "739740/260044".
+        The orders list gives a composite id like "739740/260044"; this endpoint
+        wants only the numeric part — the user id is already in the path.
         """
-        return await self._get(f"/api/v1/users/{self._user_id}/orders/{order_id}/delivery")
+        short_id = order_id.rsplit("/", 1)[-1]
+        return await self._get(
+            f"/api/v1/users/{self._user_id}/orders/{short_id}/delivery"
+        )

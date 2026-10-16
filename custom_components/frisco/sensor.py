@@ -14,11 +14,31 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from . import FriscoConfigEntry
 from .const import STATUS_LABELS
 from .coordinator import FriscoData
 from .entity import FriscoEntity
+
+
+def _order_status(order: dict[str, Any]) -> str:
+    """Human delivery status derived from the window, not just the raw status.
+
+    Frisco leaves an order "Invoiced" from finalisation through delivery, so the
+    window timing is what actually tells you where it is.
+    """
+    window = (order.get("reservation") or {}).get("deliveryWindow") or {}
+    start = _dt(window.get("startsAt"))
+    end = _dt(window.get("endsAt"))
+    now = dt_util.now()
+    if start and end and start <= now <= end:
+        return "Out for delivery"
+    if end and now > end:
+        return "Delivered"
+    if order.get("status") in ("Invoiced", "Archived"):
+        return "Confirmed"
+    return STATUS_LABELS.get(order.get("status"), order.get("status"))
 
 
 def _dt(raw: str | None) -> datetime | None:
@@ -103,11 +123,10 @@ def _valid_until(data: FriscoData) -> datetime | None:
 def _order_summary(order: dict[str, Any]) -> dict[str, Any]:
     """Compact per-order record for the `all` attribute list."""
     window = (order.get("reservation") or {}).get("deliveryWindow") or {}
-    raw_status = order.get("status")
     return {
         "order_id": order.get("id"),
-        "status": STATUS_LABELS.get(raw_status, raw_status),
-        "status_raw": raw_status,
+        "status": _order_status(order),
+        "status_raw": order.get("status"),
         "window_start": window.get("startsAt"),
         "window_end": window.get("endsAt"),
     }
@@ -126,13 +145,12 @@ def _order_attrs(data: FriscoData) -> dict[str, Any]:
         return {"count": 0}
     order = orders[0]
     window = (order.get("reservation") or {}).get("deliveryWindow") or {}
-    raw_status = order.get("status")
     stats = (order.get("deliveryStatistics") or {}).get("totals") or {}
     return {
         "count": len(orders),
         "order_id": order.get("id"),
-        "status": STATUS_LABELS.get(raw_status, raw_status),
-        "status_raw": raw_status,
+        "status": _order_status(order),
+        "status_raw": order.get("status"),
         "window_start": window.get("startsAt"),
         "window_end": window.get("endsAt"),
         "placed_at": order.get("placedAt"),

@@ -55,15 +55,21 @@ STATUS_LABELS: dict[str, str] = {
     "AbortedArchived": "Cancelled",
 }
 
-# Terminal statuses: the order is done or gone and is never "active".
-COMPLETED_STATUSES = frozenset({"Invoiced", "Archived"})
+# Cancelled orders are gone; everything else may still be on its way.
+# NOTE: "Invoiced" is NOT terminal here — Frisco marks an order Invoiced when the
+# invoice is generated (at finalisation), and it keeps that status right through
+# delivery and after. So whether an order is still "incoming" is decided by its
+# delivery window, not by the status string (see the coordinator).
 CANCELLED_STATUSES = frozenset(
     {"Cancelled", "CancelledArchived", "Aborted", "AbortedArchived"}
 )
-# An order is "active" (still coming) when it is neither completed nor cancelled.
-INACTIVE_STATUSES = COMPLETED_STATUSES | CANCELLED_STATUSES
 
-# Statuses in which a driver is on the road and /orders/{id}/delivery exists.
-# "Sent" is included defensively: the app treats both as dispatched. If only
-# "Delivery" ever carries coordinates this set is harmless.
-OUT_FOR_DELIVERY_STATUSES = frozenset({"Delivery", "Sent"})
+# How long after its delivery window ends an order is still shown as "incoming"
+# (covers deliveries that run late before the order drops off).
+ACTIVE_ORDER_GRACE = timedelta(hours=3)
+
+# Window around the delivery slot in which we attempt live driver tracking and
+# poll faster: Frisco creates the live-delivery document around dispatch, which
+# can be a while before the slot opens, and the van may still be out after it.
+DELIVERY_PRE_WINDOW = timedelta(hours=3)
+DELIVERY_POST_WINDOW = timedelta(hours=2)
